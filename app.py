@@ -1,128 +1,95 @@
-import os
-import uuid
-from flask import Flask, request, jsonify, send_file
-
+ from flask import Flask, request, jsonify, send_file
+import os, uuid
 import speech_recognition as sr
-from gtts import gTTS
 import google.generativeai as genai
+from gtts import gTTS
 
-# ===============================
-# CONFIG
-# ===============================
-PORT = int(os.environ.get("PORT", 5000))
-TEMP_DIR = "temp"
-
-# Gemini API key from Render ENV
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-
-if not GEMINI_API_KEY:
-    raise RuntimeError("GEMINI_API_KEY not set")
-
-genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel("gemini-1.5-flash")
-
-# ===============================
-# APP INIT
-# ===============================
 app = Flask(__name__)
-os.makedirs(TEMP_DIR, exist_ok=True)
 
-# ===============================
-# UTILS
-# ===============================
-def decide_command(text: str):
-    text = text.lower()
+# ================= CONFIG =================
+UPLOAD_DIR = "uploads"
+AUDIO_DIR = "audio"
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+os.makedirs(AUDIO_DIR, exist_ok=True)
 
-    if "forward" in text:
-        return "F", "Moving forward"
-    if "back" in text or "backward" in text:
-        return "B", "Moving backward"
-    if "left" in text:
-        return "L", "Turning left"
-    if "right" in text:
-        return "R", "Turning right"
-    if "stop" in text:
-        return "S", "Stopping"
+genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
 
-    return "S", None
+last_text = "No input yet"   # 🔥 STORED INPUT
 
-
-# ===============================
-# ROUTES
-# ===============================
-
-@app.route("/", methods=["GET"])
+# ================= HOME PAGE =================
+@app.route("/")
 def home():
-    return "ESP32 AI Server is running"
+    return f"""
+    <h1>ESP32 AI SERVER</h1>
+    <h2>Last ESP32 Input:</h2>
+    <p style="font-size:24px;color:blue;">{last_text}</p>
+    """
 
-
+# ================= VOICE ENDPOINT =================
 @app.route("/voice", methods=["POST"])
 def voice():
+    global last_text
 
-    # ---------- receive audio ----------
     if "audio" not in request.files:
         return jsonify({"error": "No audio file"}), 400
 
     audio_file = request.files["audio"]
+    filename = f"{uuid.uuid4()}.wav"
+    filepath = os.path.join(UPLOAD_DIR, filename)
+    audio_file.save(filepath)
 
-    uid = str(uuid.uuid4())
-    input_wav = f"{TEMP_DIR}/input_{uid}.wav"
-    output_wav = f"{TEMP_DIR}/reply_{uid}.wav"
-
-    audio_file.save(input_wav)
-
-    # ---------- speech to text ----------
     recognizer = sr.Recognizer()
+    with sr.AudioFile(filepath) as source:
+        audio = recognizer.record(source)
 
     try:
-        with sr.AudioFile(input_wav) as source:
-            audio = recognizer.record(source)
-            user_text = recognizer.recognize_google(audio)
+        text = recognizer.recognize_google(audio)
     except Exception:
-        user_text = ""
+        text = "Sorry, I could not understand"
 
-    print("USER SAID:", user_text)
+    # 🔥 SAVE + DISPLAY INPUT
+    last_text = text
+    print("🎤 Text received from ESP32:", text)
 
-    # ---------- motor intent ----------
-    command, fixed_reply = decide_command(user_text)
+    # ================= AI LOGIC =================
+    command = "S"
+    reply_text = text
 
-    # ---------- Gemini response ----------
-    if fixed_reply:
-        reply_text = fixed_reply
-    else:
-        prompt = f"""
-You are a helpful robot assistant.
-User said: "{user_text}"
-Reply in one short sentence.
-"""
-        try:
-            response = model.generate_content(prompt)
-            reply_text = response.text.strip()
-        except Exception:
-            reply_text = "Sorry, I could not understand"
+    text_lower = text.lower()
+    if "forward" in text_lower:
+        command = "F"
+        reply_text = "Moving forward"
+    elif "back" in text_lower:
+        command = "B"
+        reply_text = "Moving backward"
+    elif "left" in text_lower:
+        command = "L"
+        reply_text = "Turning left"
+    elif "right" in text_lower:
+        command = "R"
+        reply_text = "Turning right"
+    elif "stop" in text_lower:
+        command = "S"
+        reply_text = "Stopping"
 
-    print("REPLY:", reply_text)
-    print("COMMAND:", command)
-
-    # ---------- TTS ----------
+    # ================= TTS =================
     tts = gTTS(reply_text)
-    tts.save(output_wav)
+    audio_name = f"reply_{uuid.uuid4()}.wav"
+    audio_path = os.path.join(AUDIO_DIR, audio_name)
+    tts.save(audio_path)
 
-    # ---------- response ----------
     return jsonify({
-        "command": command,
         "reply_text": reply_text,
-        "audio_url": f"/audio/{os.path.basename(output_wav)}"
+        "command": command,
+        "audio_url": f"/audio/{audio_name}"
     })
 
-
-@app.route("/audio/<filename>", methods=["GET"])
+# ================= AUDIO SERVE =================
+@app.route("/audio/<filename>")
 def get_audio(filename):
-    return send_file(f"{TEMP_DIR}/{filename}", mimetype="audio/wav")
+    return send_file(os.path.join(AUDIO_DIR, filename), mimetype="audio/wav")
 
-
-# ===============================
-# MAIN
-# ===============================
+# ================= RUN =================
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=PORT)
+    app.run(host="0.0.0.0", port=5000)
+
