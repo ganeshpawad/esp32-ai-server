@@ -1,5 +1,3 @@
-flask
-google-generativeai
-speechrecognition
-pydub
-gtts
+Flask
+SpeechRecognition
+gTTS
