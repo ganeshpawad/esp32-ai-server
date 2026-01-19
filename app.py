@@ -1,5 +1,6 @@
- from flask import Flask, request, jsonify, send_file
-import os, uuid
+from flask import Flask, request, jsonify, send_file
+import os
+import uuid
 import speech_recognition as sr
 from gtts import gTTS
 
@@ -8,12 +9,13 @@ app = Flask(__name__)
 # ================= DIRECTORIES =================
 UPLOAD_DIR = "uploads"
 AUDIO_DIR = "audio"
+
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(AUDIO_DIR, exist_ok=True)
 
 # ================= GLOBAL STATE =================
 last_text = "No input yet"
-history = []   # last 10 commands
+history = []  # last 10 commands
 
 # ================= HOME PAGE =================
 @app.route("/")
@@ -24,24 +26,21 @@ def home():
 
     return f"""
     <html>
-    <head>
-        <title>ESP32 AI Server</title>
-    </head>
     <body style="font-family:Arial;">
         <h1>ESP32 AI Voice Server</h1>
 
         <h2>Status:</h2>
-        <p style="font-size:20px;color:green;">
+        <p style="color:green;font-size:20px;">
             BUTTON CONTROL MODE (ESP32)
         </p>
 
         <h2>Last ESP32 Input:</h2>
-        <p style="font-size:24px;color:blue;">
+        <p style="font-size:22px;color:blue;">
             {last_text}
         </p>
 
         <h2>Command History (Latest 10)</h2>
-        <p style="font-size:18px;">
+        <p>
             {history_html if history else "No history yet"}
         </p>
     </body>
@@ -56,13 +55,11 @@ def voice():
     if "audio" not in request.files:
         return jsonify({"error": "No audio file"}), 400
 
-    # ---------- Save audio ----------
     audio_file = request.files["audio"]
     filename = f"{uuid.uuid4()}.wav"
     filepath = os.path.join(UPLOAD_DIR, filename)
     audio_file.save(filepath)
 
-    # ---------- Speech to Text ----------
     recognizer = sr.Recognizer()
     with sr.AudioFile(filepath) as source:
         audio = recognizer.record(source)
@@ -74,7 +71,6 @@ def voice():
 
     print("🎤 ESP32 said:", text)
 
-    # ---------- Defaults ----------
     command = "S"
     reply_text = "I did not understand"
 
@@ -82,34 +78,26 @@ def voice():
         last_text = text
         history.append(text)
         history[:] = history[-10:]
-        text_lower = text.lower()
+        t = text.lower()
 
-        # ---------- COMMAND LOGIC ----------
-        if "forward" in text_lower:
+        if "forward" in t:
             command = "F"
             reply_text = "Moving forward"
-
-        elif "back" in text_lower or "backward" in text_lower:
+        elif "back" in t:
             command = "B"
             reply_text = "Moving backward"
-
-        elif "left" in text_lower:
+        elif "left" in t:
             command = "L"
             reply_text = "Turning left"
-
-        elif "right" in text_lower:
+        elif "right" in t:
             command = "R"
             reply_text = "Turning right"
-
-        elif "stop" in text_lower:
+        elif "stop" in t:
             command = "S"
             reply_text = "Stopping"
-
         else:
             reply_text = "Command not recognized"
-            command = "S"
 
-    # ---------- TEXT TO SPEECH ----------
     tts = gTTS(reply_text)
     audio_name = f"reply_{uuid.uuid4()}.wav"
     audio_path = os.path.join(AUDIO_DIR, audio_name)
@@ -132,4 +120,3 @@ def get_audio(filename):
 # ================= RUN =================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
-
