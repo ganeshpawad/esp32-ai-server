@@ -1,13 +1,17 @@
 from flask import Flask, request, jsonify, Response
 import struct
+from threading import Lock
 
 app = Flask(__name__)
 
 audio_chunks = bytearray()
+lock = Lock()
 
-SAMPLE_RATE = 8000
+# MUST MATCH ESP32
+SAMPLE_RATE = 16000
 CHANNELS = 1
 BITS = 16
+
 
 def pcm_to_wav(pcm: bytes) -> bytes:
     byte_rate = SAMPLE_RATE * CHANNELS * BITS // 8
@@ -33,38 +37,50 @@ def pcm_to_wav(pcm: bytes) -> bytes:
     )
     return header + pcm
 
+
 @app.route("/")
 def index():
     return "ESP32 ECHO SERVER RUNNING"
 
+
 @app.route("/reset", methods=["POST"])
 def reset():
     global audio_chunks
-    audio_chunks = bytearray()
+    with lock:
+        audio_chunks = bytearray()
     return jsonify({"status": "ok", "message": "BUFFER_RESET"})
+
 
 @app.route("/voice", methods=["POST"])
 def voice():
     global audio_chunks
     chunk = request.data
-    if not chunk:
-        return jsonify({"status": "error"}), 400
 
-    audio_chunks.extend(chunk)
+    if not chunk:
+        return jsonify({"status": "error", "msg": "EMPTY_CHUNK"}), 400
+
+    with lock:
+        audio_chunks.extend(chunk)
+        total = len(audio_chunks)
+
     return jsonify({
         "status": "ok",
         "chunk_bytes": len(chunk),
-        "total_bytes": len(audio_chunks)
+        "total_bytes": total
     })
+
 
 @app.route("/echo", methods=["GET"])
 def echo():
     if not audio_chunks:
         return jsonify({"error": "NO_AUDIO"}), 400
 
-    wav = pcm_to_wav(audio_chunks)
+    with lock:
+        wav = pcm_to_wav(bytes(audio_chunks))
+
     return Response(wav, mimetype="audio/wav")
 
+
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    app.run(host="0.0.0.0", port=5000, threaded=True)
 
